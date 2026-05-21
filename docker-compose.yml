@@ -1,0 +1,20 @@
+services:
+  schedule:
+    build: .
+    container_name: alerta-doc-schedule
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      # Credenciais vêm do .env (não commitar senhas no repositório)
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-alerta_doc}?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+networks:
+  default:
+    external: true
+    name: alerta-doc-api_default

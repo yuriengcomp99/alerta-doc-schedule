@@ -1,0 +1,32 @@
+{
+  "name": "alerta-doc-schedule",
+  "version": "0.1.0",
+  "description": "Agendamento Alerta Doc — Postgres + RabbitMQ (mesma infra da API)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "job:check-expiring": "tsx src/scripts/run-check-expiring-job.ts",
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "amqplib": "^0.10.8",
+    "dotenv": "^16.6.1",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.7",
+    "@types/node": "^22.15.21",
+    "@types/node-cron": "^3.0.11",
+    "prisma": "^6.8.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

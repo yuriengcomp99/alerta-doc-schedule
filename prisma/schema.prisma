@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum DocumentStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String?
+  role         UserRole   @default(USER)
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  documents     Document[]
+  authSessions  AuthSession[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokenHash  String    @unique @map("access_token_hash")
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  accessExpiresAt  DateTime  @map("access_expires_at")
+  refreshExpiresAt DateTime  @map("refresh_expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([accessTokenHash])
+  @@index([refreshTokenHash])
+  @@map("auth_sessions")
+}
+
+model Document {
+  id          String         @id @default(uuid())
+  title       String
+  description String?
+  status      DocumentStatus @default(DRAFT)
+  fileUrl     String?        @map("file_url")
+  expiresAt   DateTime?      @map("expires_at") @db.Date
+  ownerId     String         @map("owner_id")
+  owner       User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("documents")
+}
+
+model Notification {
+  id     String   @id @default(uuid())
+  msg    String
+  data   DateTime @default(now())
+  read   Boolean  @default(false)
+  userId String   @map("user_id")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
