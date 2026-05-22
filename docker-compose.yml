@@ -7,7 +7,6 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      # Credenciais vêm do .env (não commitar senhas no repositório)
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-alerta_doc}?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
     volumes:
