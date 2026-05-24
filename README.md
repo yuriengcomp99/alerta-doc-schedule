@@ -58,60 +58,70 @@ sequenceDiagram
   Job->>UC: execute() com retry (até 3x)
   UC->>DB: docs expires_at = hoje
   UC->>DB: docs expires_at = amanhã
-  loop cada documento
-    UC->>Q: publish documents.expiring.today ou .tomorrow
+  loop cada dono (agrupado)
+    UC->>Q: publish batch documents.expiring.today ou .tomorrow
   end
   Job->>Job: log [job:admin] resumo no console
 ```
 
 1. Calcula a data de referência em `TZ` (ex.: `2026-05-21` em São Paulo).
 2. Consulta documentos cuja `expires_at` é **igual** a hoje ou a amanhã (tipo `DATE`, sem hora).
-3. Para cada registro, monta um `DocumentExpiringEvent` e envia à fila correta.
+3. Agrupa por `owner_id` e publica **um** `DocumentsExpiringBatchEvent` por dono e janela (hoje/amanhã).
 4. Em caso de falha (DB/Rabbit), tenta de novo até `JOB_MAX_RETRIES` (sem loop infinito).
-5. Ao concluir com sucesso, imprime quantos eventos foram publicados.
+5. Ao concluir com sucesso, imprime quantos documentos e quantas mensagens foram publicadas.
 
 ## Filas e contrato de evento
 
 | Fila RabbitMQ | Critério no banco | `eventType` |
 |---------------|-------------------|-------------|
-| `documents.expiring.today` | `expires_at` = data de hoje (`TZ`) | `document.expiring.today` |
-| `documents.expiring.tomorrow` | `expires_at` = data de amanhã (`TZ`) | `document.expiring.tomorrow` |
+| `documents.expiring.today` | `expires_at` = data de hoje (`TZ`) | `documents.expiring.today` |
+| `documents.expiring.tomorrow` | `expires_at` = data de amanhã (`TZ`) | `documents.expiring.tomorrow` |
 
 Mensagens são **persistentes**, `content-type: application/json`.
 
-### Payload (por documento)
+### Payload (por dono — um e-mail no consumer)
 
 ```json
 {
   "eventId": "550e8400-e29b-41d4-a716-446655440000",
-  "eventType": "document.expiring.today",
-  "documentId": "uuid-do-documento",
-  "title": "CNH - João Silva",
+  "eventType": "documents.expiring.today",
   "ownerId": "uuid-do-usuario",
   "ownerEmail": "joao@example.com",
-  "expiresAt": "2026-05-21",
-  "occurredAt": "2026-05-21T11:00:00.000Z"
+  "referenceDate": "2026-05-23",
+  "occurredAt": "2026-05-23T20:35:00.000Z",
+  "documents": [
+    {
+      "documentId": "uuid-doc-1",
+      "title": "CNH",
+      "expiresAt": "2026-05-23"
+    },
+    {
+      "documentId": "uuid-doc-2",
+      "title": "Contrato 2026",
+      "expiresAt": "2026-05-23"
+    }
+  ]
 }
 ```
 
-| Campo | Uso sugerido no consumer |
-|-------|---------------------------|
+| Campo | Uso no consumer |
+|-------|-----------------|
 | `eventId` | Idempotência / auditoria |
-| `eventType` | Texto ou regra (vence hoje vs amanhã) |
-| `documentId` | Chave do documento |
+| `eventType` | Janela (hoje vs amanhã) |
 | `ownerId` | `notifications.user_id` |
-| `ownerEmail` | Envio de e-mail |
-| `expiresAt` | Data no corpo da mensagem (`YYYY-MM-DD`) |
+| `ownerEmail` | Destinatário do e-mail |
+| `referenceDate` | Data de referência do job (`YYYY-MM-DD`, TZ) |
+| `documents` | Lista de documentos vencendo na janela |
 | `occurredAt` | Quando o schedule publicou o evento |
 
-Tipo TypeScript: `src/events/document-expiring.event.ts`.
+Tipo TypeScript: `src/events/documents-expiring.event.ts`.
 
 ## Estrutura do projeto
 
 ```
 src/
 ├── config/           variáveis de ambiente
-├── events/           contrato DocumentExpiringEvent
+├── events/           contrato DocumentsExpiringBatchEvent
 ├── factories/        wiring do job
 ├── jobs/             check-expiring-documents
 ├── lib/              prisma, rabbitmq, datas, retry, log admin
