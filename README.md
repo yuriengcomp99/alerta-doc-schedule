@@ -8,7 +8,7 @@ Microserviço de **agendamento** do ecossistema [Alerta Doc](https://github.com/
 |-----|---------|
 | Agenda execução via cron (padrão **08:00**, fuso `America/Sao_Paulo`) | Enviar e-mail ou notificação ao usuário final |
 | Busca documentos com `expires_at` = **hoje** ou **amanhã** | Alterar documentos no banco |
-| Publica **1 mensagem JSON por documento** nas filas RabbitMQ | Consumir as filas (isso é outro microserviço) |
+| Publica **1 mensagem por dono** (hoje + amanhã no mesmo evento) | Consumir a fila (microserviço de notificação) |
 | Log de resumo no console ao terminar | Rodar migrações de banco (feito na `alerta-doc-api`) |
 
 ## Arquitetura no ecossistema
@@ -34,8 +34,7 @@ flowchart LR
     CONS --> PG
   end
 
-  RMQ -->|documents.expiring.today| CONS
-  RMQ -->|documents.expiring.tomorrow| CONS
+  RMQ -->|documents.expiring| CONS
 ```
 
 **Dependências externas obrigatórias:**
@@ -58,61 +57,60 @@ sequenceDiagram
   Job->>UC: execute() com retry (até 3x)
   UC->>DB: docs expires_at = hoje
   UC->>DB: docs expires_at = amanhã
-  loop cada dono (agrupado)
-    UC->>Q: publish batch documents.expiring.today ou .tomorrow
+  loop cada dono
+    UC->>Q: publish documents.expiring (hoje + amanhã)
   end
   Job->>Job: log [job:admin] resumo no console
 ```
 
 1. Calcula a data de referência em `TZ` (ex.: `2026-05-21` em São Paulo).
 2. Consulta documentos cuja `expires_at` é **igual** a hoje ou a amanhã (tipo `DATE`, sem hora).
-3. Agrupa por `owner_id` e publica **um** `DocumentsExpiringBatchEvent` por dono e janela (hoje/amanhã).
+3. Agrupa por `owner_id` e publica **um** evento por dono com todos os documentos de hoje e amanhã.
 4. Em caso de falha (DB/Rabbit), tenta de novo até `JOB_MAX_RETRIES` (sem loop infinito).
 5. Ao concluir com sucesso, imprime quantos documentos e quantas mensagens foram publicadas.
 
-## Filas e contrato de evento
+## Fila e contrato de evento
 
-| Fila RabbitMQ | Critério no banco | `eventType` |
-|---------------|-------------------|-------------|
-| `documents.expiring.today` | `expires_at` = data de hoje (`TZ`) | `documents.expiring.today` |
-| `documents.expiring.tomorrow` | `expires_at` = data de amanhã (`TZ`) | `documents.expiring.tomorrow` |
+| Fila RabbitMQ | `eventType` |
+|---------------|-------------|
+| `documents.expiring` | `documents.expiring` |
+
+Critério no banco: `expires_at` = **hoje** ou **amanhã** (data em `TZ`). Um evento por dono reúne os dois grupos.
 
 Mensagens são **persistentes**, `content-type: application/json`.
 
-### Payload (por dono — um e-mail no consumer)
+### Payload (por dono — um e-mail com hoje e amanhã)
 
 ```json
 {
   "eventId": "550e8400-e29b-41d4-a716-446655440000",
-  "eventType": "documents.expiring.today",
+  "eventType": "documents.expiring",
   "ownerId": "uuid-do-usuario",
   "ownerEmail": "joao@example.com",
-  "referenceDate": "2026-05-23",
-  "occurredAt": "2026-05-23T20:35:00.000Z",
+  "referenceDate": "2026-05-24",
+  "occurredAt": "2026-05-24T20:35:00.000Z",
   "documents": [
     {
       "documentId": "uuid-doc-1",
       "title": "CNH",
-      "expiresAt": "2026-05-23"
+      "expiresAt": "2026-05-24",
+      "when": "today"
     },
     {
       "documentId": "uuid-doc-2",
-      "title": "Contrato 2026",
-      "expiresAt": "2026-05-23"
+      "title": "Contrato",
+      "expiresAt": "2026-05-25",
+      "when": "tomorrow"
     }
   ]
 }
 ```
 
-| Campo | Uso no consumer |
-|-------|-----------------|
-| `eventId` | Idempotência / auditoria |
-| `eventType` | Janela (hoje vs amanhã) |
-| `ownerId` | `notifications.user_id` |
-| `ownerEmail` | Destinatário do e-mail |
-| `referenceDate` | Data de referência do job (`YYYY-MM-DD`, TZ) |
-| `documents` | Lista de documentos vencendo na janela |
-| `occurredAt` | Quando o schedule publicou o evento |
+| Campo | Uso |
+|-------|-----|
+| `documents[].when` | `"today"` ou `"tomorrow"` — texto do e-mail/notificação |
+| `ownerId` / `ownerEmail` | Destinatário |
+| `referenceDate` | Data do job no fuso configurado |
 
 Tipo TypeScript: `src/events/documents-expiring.event.ts`.
 
@@ -121,7 +119,7 @@ Tipo TypeScript: `src/events/documents-expiring.event.ts`.
 ```
 src/
 ├── config/           variáveis de ambiente
-├── events/           contrato DocumentsExpiringBatchEvent
+├── events/           contrato DocumentsExpiringEvent
 ├── factories/        wiring do job
 ├── jobs/             check-expiring-documents
 ├── lib/              prisma, rabbitmq, datas, retry, log admin
@@ -187,8 +185,8 @@ Saída esperada (exemplo):
 
 ```text
 [script] executando job check-expiring-documents (manual)
-[job:check-expiring-documents] ref=2026-05-21 hoje=0 amanhã=0
-[job:admin] Alerta Doc: job vencimentos OK (2026-05-21). Hoje: 0, Amanhã: 0.
+[job:check-expiring-documents] ref=2026-05-24 docs=0 (hoje=0 amanhã=0) avisos=0
+[job:admin] Alerta Doc: job vencimentos OK (2026-05-24). 0 documento(s) em 0 aviso(s).
 ```
 
 ### 3. Serviço com cron (desenvolvimento)
@@ -233,7 +231,7 @@ No compose, `DATABASE_URL` e `RABBITMQ_URL` usam hostnames `postgres` e `rabbitm
 ## Verificar filas no RabbitMQ
 
 1. Abra http://localhost:15672 (credenciais do seu RabbitMQ local)
-2. **Queues** → `documents.expiring.today` ou `documents.expiring.tomorrow`
+2. **Queues** → `documents.expiring`
 3. Rode `npm run job:check-expiring` com um documento de teste:
 
 ```sql

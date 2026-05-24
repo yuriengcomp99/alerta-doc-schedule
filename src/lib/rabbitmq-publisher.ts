@@ -13,8 +13,7 @@ async function getChannel(): Promise<Channel> {
   connection = await amqp.connect(env.rabbitmqUrl);
   channel = await connection.createChannel();
 
-  await channel.assertQueue(QUEUES.DOCUMENTS_EXPIRING_TODAY, { durable: true });
-  await channel.assertQueue(QUEUES.DOCUMENTS_EXPIRING_TOMORROW, { durable: true });
+  await channel.assertQueue(QUEUES.DOCUMENTS_EXPIRING, { durable: true });
 
   return channel;
 }

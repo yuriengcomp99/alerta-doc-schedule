@@ -1,4 +1,3 @@
 export const QUEUES = {
-  DOCUMENTS_EXPIRING_TODAY: "documents.expiring.today",
-  DOCUMENTS_EXPIRING_TOMORROW: "documents.expiring.tomorrow",
+  DOCUMENTS_EXPIRING: "documents.expiring",
 } as const;

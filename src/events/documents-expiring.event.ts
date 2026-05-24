@@ -1,16 +1,16 @@
-export type DocumentsExpiringEventType =
-  | "documents.expiring.today"
-  | "documents.expiring.tomorrow";
+export type ExpiringWhen = "today" | "tomorrow";
 
 export type ExpiringDocumentItem = {
   documentId: string;
   title: string;
   expiresAt: string;
+  when: ExpiringWhen;
 };
 
-export type DocumentsExpiringBatchEvent = {
+/** Um evento por dono: todos os documentos que vencem hoje ou amanhã. */
+export type DocumentsExpiringEvent = {
   eventId: string;
-  eventType: DocumentsExpiringEventType;
+  eventType: "documents.expiring";
   ownerId: string;
   ownerEmail: string;
   referenceDate: string;

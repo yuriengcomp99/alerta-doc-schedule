@@ -15,16 +15,17 @@ export class CheckExpiringDocumentsJob {
       "check-expiring-documents",
     );
 
+    const total = result.documentsToday + result.documentsTomorrow;
+
     console.log(
       `[job:check-expiring-documents] ref=${result.referenceDate} ` +
-        `docs hoje=${result.documentsToday} amanhã=${result.documentsTomorrow} ` +
-        `msgs hoje=${result.batchMessagesToday} amanhã=${result.batchMessagesTomorrow}`,
+        `docs=${total} (hoje=${result.documentsToday} amanhã=${result.documentsTomorrow}) ` +
+        `avisos=${result.batchMessages}`,
     );
 
     const adminMessage =
       `Alerta Doc: job vencimentos OK (${result.referenceDate}). ` +
-      `Hoje: ${result.documentsToday} doc(s) em ${result.batchMessagesToday} aviso(s). ` +
-      `Amanhã: ${result.documentsTomorrow} doc(s) em ${result.batchMessagesTomorrow} aviso(s).`;
+      `${total} documento(s) em ${result.batchMessages} aviso(s).`;
 
     notifyAdminJobFinished(adminMessage);
   }

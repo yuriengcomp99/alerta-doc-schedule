@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type {
-  DocumentsExpiringBatchEvent,
+  DocumentsExpiringEvent,
   ExpiringDocumentItem,
+  ExpiringWhen,
 } from "../events/documents-expiring.event.js";
 import {
   addCalendarDays,
@@ -18,31 +19,23 @@ import type {
 export type PublishExpiringResult = {
   documentsToday: number;
   documentsTomorrow: number;
-  batchMessagesToday: number;
-  batchMessagesTomorrow: number;
+  batchMessages: number;
   referenceDate: string;
 };
 
-function groupByOwner(
-  docs: ExpiringDocumentRecord[],
-): Map<string, ExpiringDocumentRecord[]> {
-  const groups = new Map<string, ExpiringDocumentRecord[]>();
+type OwnerBucket = {
+  ownerId: string;
+  ownerEmail: string;
+  documents: ExpiringDocumentItem[];
+};
 
-  for (const doc of docs) {
-    const list = groups.get(doc.ownerId) ?? [];
-    list.push(doc);
-    groups.set(doc.ownerId, list);
-  }
-
-  return groups;
-}
-
-function toDocumentItems(docs: ExpiringDocumentRecord[]): ExpiringDocumentItem[] {
-  return docs.map((doc) => ({
+function toItem(doc: ExpiringDocumentRecord, when: ExpiringWhen): ExpiringDocumentItem {
+  return {
     documentId: doc.id,
     title: doc.title,
     expiresAt: doc.expiresAt.toISOString().slice(0, 10),
-  }));
+    when,
+  };
 }
 
 export class PublishExpiringDocumentsUseCase {
@@ -60,59 +53,55 @@ export class PublishExpiringDocumentsUseCase {
       this.documents.findExpiringOnDate(parseDateOnly(tomorrowDate)),
     ]);
 
+    const byOwner = new Map<string, OwnerBucket>();
+
+    for (const doc of todayDocs) {
+      this.addDoc(byOwner, doc, "today");
+    }
+    for (const doc of tomorrowDocs) {
+      this.addDoc(byOwner, doc, "tomorrow");
+    }
+
     const occurredAt = new Date().toISOString();
+    let batchMessages = 0;
 
-    const batchMessagesToday = await this.publishBatches(
-      QUEUES.DOCUMENTS_EXPIRING_TODAY,
-      "documents.expiring.today",
-      todayDocs,
-      referenceDate,
-      occurredAt,
-    );
+    for (const bucket of byOwner.values()) {
+      const payload: DocumentsExpiringEvent = {
+        eventId: randomUUID(),
+        eventType: "documents.expiring",
+        ownerId: bucket.ownerId,
+        ownerEmail: bucket.ownerEmail,
+        referenceDate,
+        occurredAt,
+        documents: bucket.documents,
+      };
 
-    const batchMessagesTomorrow = await this.publishBatches(
-      QUEUES.DOCUMENTS_EXPIRING_TOMORROW,
-      "documents.expiring.tomorrow",
-      tomorrowDocs,
-      referenceDate,
-      occurredAt,
-    );
+      await publishMessage(QUEUES.DOCUMENTS_EXPIRING, payload);
+      batchMessages += 1;
+    }
 
     return {
       documentsToday: todayDocs.length,
       documentsTomorrow: tomorrowDocs.length,
-      batchMessagesToday,
-      batchMessagesTomorrow,
+      batchMessages,
       referenceDate,
     };
   }
 
-  private async publishBatches(
-    queue: string,
-    eventType: DocumentsExpiringBatchEvent["eventType"],
-    docs: ExpiringDocumentRecord[],
-    referenceDate: string,
-    occurredAt: string,
-  ): Promise<number> {
-    const byOwner = groupByOwner(docs);
-    let messages = 0;
-
-    for (const ownerDocs of byOwner.values()) {
-      const first = ownerDocs[0];
-      const payload: DocumentsExpiringBatchEvent = {
-        eventId: randomUUID(),
-        eventType,
-        ownerId: first.ownerId,
-        ownerEmail: first.ownerEmail,
-        referenceDate,
-        occurredAt,
-        documents: toDocumentItems(ownerDocs),
+  private addDoc(
+    byOwner: Map<string, OwnerBucket>,
+    doc: ExpiringDocumentRecord,
+    when: ExpiringWhen,
+  ): void {
+    let bucket = byOwner.get(doc.ownerId);
+    if (!bucket) {
+      bucket = {
+        ownerId: doc.ownerId,
+        ownerEmail: doc.ownerEmail,
+        documents: [],
       };
-
-      await publishMessage(queue, payload);
-      messages += 1;
+      byOwner.set(doc.ownerId, bucket);
     }
-
-    return messages;
+    bucket.documents.push(toItem(doc, when));
   }
 }
